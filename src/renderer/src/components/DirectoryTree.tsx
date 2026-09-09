@@ -12,7 +12,7 @@ import FolderIcon from './FolderIcon'
 
 interface DirectoryTreeProps {
   nodes: DirectoryTreeNode[]
-  selectedId: string | null
+  selectedKey: 'all' | 'home' | string
   onDragItems: (folder: FolderRecord) => string[]
   onDropOnDirectory: (directoryId: string | null) => void
   onContextMenu?: (event: MouseEvent, folder: FolderRecord) => void
@@ -67,7 +67,7 @@ function TreeGuides({
 function TreeNodes({
   nodes,
   roots,
-  selectedId,
+  selectedKey,
   ancestors,
   dropId,
   dragging,
@@ -79,7 +79,7 @@ function TreeNodes({
 }: {
   nodes: DirectoryTreeNode[]
   roots: DirectoryTreeNode[]
-  selectedId: string | null
+  selectedKey: 'all' | 'home' | string
   ancestors: boolean[]
   dropId: string | null
   dragging: boolean
@@ -102,7 +102,7 @@ function TreeNodes({
   return (
     <ul>
       {nodes.map((node, index) => {
-        const selected = node.folder.id === selectedId
+        const selected = node.folder.id === selectedKey
         const isLast = index === nodes.length - 1
         return (
           <li key={node.folder.id}>
@@ -154,7 +154,7 @@ function TreeNodes({
               <TreeNodes
                 nodes={node.children}
                 roots={roots}
-                selectedId={selectedId}
+                selectedKey={selectedKey}
                 ancestors={[...ancestors, !isLast]}
                 dropId={dropId}
                 dragging={dragging}
@@ -174,7 +174,7 @@ function TreeNodes({
 
 export default function DirectoryTree({
   nodes,
-  selectedId,
+  selectedKey,
   onDragItems,
   onDropOnDirectory,
   onContextMenu
@@ -190,6 +190,15 @@ export default function DirectoryTree({
     setDropId('home')
   }
 
+  const rowClass = (active: boolean, dropActive: boolean): string =>
+    `relative flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${
+      dropActive
+        ? 'bg-amber-500/25 text-amber-100'
+        : active
+          ? 'bg-amber-500/15 text-amber-100'
+          : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+    }`
+
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950/80">
       <div className="border-b border-zinc-800 px-3 py-3">
@@ -203,6 +212,21 @@ export default function DirectoryTree({
               if (dragging) return
               navigate('/')
             }}
+            className={rowClass(selectedKey === 'all', false)}
+          >
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-300">
+              <FolderIcon className="size-3.5" />
+            </span>
+            All
+          </button>
+        </div>
+        <div className="flex items-stretch px-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (dragging) return
+              navigate('/home')
+            }}
             onDragOver={onHomeDragOver}
             onDragLeave={() => {
               if (dropId === 'home') setDropId(null)
@@ -213,13 +237,7 @@ export default function DirectoryTree({
               if (!canDropOnDirectory(null)) return
               onDropOnDirectory(null)
             }}
-            className={`relative flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${
-              dropId === 'home'
-                ? 'bg-amber-500/25 text-amber-100'
-                : selectedId === null
-                  ? 'bg-amber-500/15 text-amber-100'
-                  : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
-            }`}
+            className={rowClass(selectedKey === 'home', dropId === 'home')}
           >
             <span className="relative flex size-6 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-300">
               <FolderIcon className="size-3.5" />
@@ -239,7 +257,7 @@ export default function DirectoryTree({
           <TreeNodes
             nodes={nodes}
             roots={nodes}
-            selectedId={selectedId}
+            selectedKey={selectedKey}
             ancestors={[]}
             dropId={dropId}
             dragging={dragging}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type MouseEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { DirectoryChild, DirectoryTreeNode, FilterMode, FolderRecord } from '@shared/types'
 import BulkTagDialog from '../components/BulkTagDialog'
 import ContextMenu from '../components/ContextMenu'
@@ -25,7 +25,10 @@ interface PendingDirectory {
 
 export default function ListingPage(): JSX.Element {
   const navigate = useNavigate()
+  const location = useLocation()
   const { directoryId = null } = useParams()
+  const isHomeView = location.pathname === '/home'
+  const selectedKey = directoryId ?? (isHomeView ? 'home' : 'all')
   const [view, setView] = useState<ViewMode>('grid')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -59,7 +62,7 @@ export default function ListingPage(): JSX.Element {
   useEffect(() => {
     setSelectedIds([])
     lastSelectedId.current = null
-  }, [directoryId])
+  }, [directoryId, location.pathname])
 
   useEffect(() => {
     const handle = window.setTimeout(() => setDebouncedSearch(search), 180)
@@ -71,6 +74,7 @@ export default function ListingPage(): JSX.Element {
       const [rows, directoryTree] = await Promise.all([
         window.api.folders.listExplorer({
           parentId: directoryId,
+          scope: directoryId ? 'directory' : isHomeView ? 'home' : 'all',
           search: debouncedSearch,
           tags
         }),
@@ -94,7 +98,7 @@ export default function ListingPage(): JSX.Element {
     } catch (err) {
       setError(errorMessage(err))
     }
-  }, [directoryId, debouncedSearch, tags])
+  }, [directoryId, isHomeView, debouncedSearch, tags])
 
   useEffect(() => {
     void load()
@@ -503,7 +507,7 @@ export default function ListingPage(): JSX.Element {
     <div className="flex h-full">
       <DirectoryTree
         nodes={tree}
-        selectedId={directoryId}
+        selectedKey={selectedKey}
         onDragItems={dragItemIds}
         onDropOnDirectory={(id) => void moveSelectedToDirectory(id)}
         onContextMenu={openContextMenu}
@@ -514,12 +518,20 @@ export default function ListingPage(): JSX.Element {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold text-zinc-50">
-                {currentDirectory ? currentDirectory.name : 'Directories'}
+                {currentDirectory ? currentDirectory.name : isHomeView ? 'Home' : 'All'}
               </h1>
               <nav className="mt-1 flex flex-wrap items-center gap-1 text-sm text-zinc-500">
                 <Link to="/" className="hover:text-amber-300">
-                  Home
+                  All
                 </Link>
+                {isHomeView ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-zinc-600">/</span>
+                    <Link to="/home" className="hover:text-amber-300">
+                      Home
+                    </Link>
+                  </span>
+                ) : null}
                 {breadcrumb.map((crumb) => (
                   <span key={crumb.id} className="flex items-center gap-1">
                     <span className="text-zinc-600">/</span>

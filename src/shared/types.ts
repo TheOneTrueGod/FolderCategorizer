@@ -19,6 +19,7 @@ export interface FolderRecord {
   existsOnDisk: boolean
   filterMode: FilterMode | null
   filterEntries: string[]
+  ignoredEntries: string[]
   tags: string[]
   images: ImageRecord[]
   directoryOwner: string | null
@@ -40,6 +41,7 @@ export interface FolderListQuery {
 
 export interface ExplorerQuery {
   parentId: string | null
+  scope?: 'all' | 'home' | 'directory'
   search?: string
   tags?: string[]
 }
@@ -87,6 +89,7 @@ export interface FolderMeta {
   path: string
   filterMode: FilterMode | null
   filterEntries: string[]
+  ignoredEntries: string[]
   tags: string[]
   images: ImageRecord[]
   directoryOwner: string | null

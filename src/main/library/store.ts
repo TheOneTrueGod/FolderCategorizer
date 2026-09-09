@@ -165,6 +165,17 @@ function replaceFilters(folderId: string, entries: string[]): void {
   }
 }
 
+function replaceIgnored(folderId: string, entries: string[]): void {
+  const db = getDb()
+  db.prepare('DELETE FROM directory_ignored WHERE folder_id = ?').run(folderId)
+  const insert = db.prepare(
+    'INSERT INTO directory_ignored (folder_id, entry_name) VALUES (?, ?)'
+  )
+  for (const entry of entries) {
+    insert.run(folderId, entry)
+  }
+}
+
 function upsertFolderFromMeta(meta: FolderMeta, existsOnDisk: boolean): void {
   const db = getDb()
   db.prepare(
@@ -203,6 +214,7 @@ function upsertFolderFromMeta(meta: FolderMeta, existsOnDisk: boolean): void {
   replaceFolderTags(meta.id, meta.tags)
   replaceImages(meta.id, meta.images)
   replaceFilters(meta.id, meta.filterEntries)
+  replaceIgnored(meta.id, meta.ignoredEntries ?? [])
 }
 
 function loadTags(folderId: string): string[] {
@@ -247,6 +259,51 @@ function loadFilterEntries(folderId: string): string[] {
   return rows.map((row) => row.entry_name)
 }
 
+function loadIgnoredEntries(folderId: string): string[] {
+  const rows = getDb()
+    .prepare(
+      `
+      SELECT entry_name
+      FROM directory_ignored
+      WHERE folder_id = ?
+      ORDER BY entry_name COLLATE NOCASE
+    `
+    )
+    .all(folderId) as { entry_name: string }[]
+  return rows.map((row) => row.entry_name)
+}
+
+function uniqueNames(names: string[]): string[] {
+  return Array.from(new Set(names.filter(Boolean)))
+}
+
+function isExcludedName(directory: FolderRecord, name: string): boolean {
+  if (directory.ignoredEntries.includes(name)) return true
+  return directory.filterMode === 'denylist' && directory.filterEntries.includes(name)
+}
+
+function ignoredFromFilter(
+  dirPath: string,
+  filterMode: FilterMode | null,
+  filterEntries: string[],
+  previousIgnored: string[] = []
+): string[] {
+  if (!dirPath || isVirtualPath(dirPath) || !pathExists(dirPath)) {
+    return uniqueNames(previousIgnored)
+  }
+  const selected = new Set(filterEntries)
+  if (filterMode === 'allowlist' && selected.size > 0) {
+    const unselected = listDirectoryChildren(dirPath)
+      .map((child) => child.name)
+      .filter((name) => !selected.has(name))
+    return uniqueNames([...unselected, ...previousIgnored.filter((name) => !selected.has(name))])
+  }
+  if (filterMode === 'denylist') {
+    return uniqueNames([...filterEntries, ...previousIgnored])
+  }
+  return uniqueNames(previousIgnored)
+}
+
 function rowToRecord(row: FolderRow): FolderRecord {
   return {
     id: row.id,
@@ -259,6 +316,7 @@ function rowToRecord(row: FolderRow): FolderRecord {
     existsOnDisk: isVirtualPath(row.path) ? true : Boolean(row.exists_on_disk),
     filterMode: row.filter_mode,
     filterEntries: loadFilterEntries(row.id),
+    ignoredEntries: loadIgnoredEntries(row.id),
     tags: loadTags(row.id),
     images: loadImages(row.id),
     directoryOwner: row.directory_owner ?? null,
@@ -277,6 +335,7 @@ function recordToMeta(record: FolderRecord): FolderMeta {
     path: record.path,
     filterMode: record.filterMode,
     filterEntries: record.filterEntries,
+    ignoredEntries: record.ignoredEntries ?? [],
     tags: record.tags,
     images: record.images,
     directoryOwner: record.directoryOwner,
@@ -399,6 +458,7 @@ export function addFolder(input: AddFolderInput): FolderRecord {
       path: `virtual:${id}`,
       filterMode: input.filterMode ?? 'allowlist',
       filterEntries: input.filterEntries ?? [],
+      ignoredEntries: [],
       tags: [],
       images: [],
       directoryOwner: resolveOwnerId(input.directoryOwner),
@@ -429,6 +489,8 @@ export function addFolder(input: AddFolderInput): FolderRecord {
 
   const filterMode = input.type === 'directory' ? (input.filterMode ?? 'allowlist') : null
   const filterEntries = input.type === 'directory' ? (input.filterEntries ?? []) : []
+  const ignoredEntries =
+    input.type === 'directory' ? ignoredFromFilter(input.path, filterMode, filterEntries) : []
   const meta: FolderMeta = {
     id,
     type: input.type,
@@ -438,6 +500,7 @@ export function addFolder(input: AddFolderInput): FolderRecord {
     path: input.path,
     filterMode,
     filterEntries,
+    ignoredEntries,
     tags: [],
     images: [],
     directoryOwner: resolveOwnerId(input.directoryOwner),
@@ -484,6 +547,12 @@ export function linkDirectoryPath(
     existsOnDisk: true,
     filterMode: filterMode ?? current.filterMode ?? 'allowlist',
     filterEntries: filterEntries ?? current.filterEntries,
+    ignoredEntries: ignoredFromFilter(
+      diskPath,
+      filterMode ?? current.filterMode ?? 'allowlist',
+      filterEntries ?? current.filterEntries,
+      current.ignoredEntries
+    ),
     updatedAt: nowIso()
   }
 
@@ -529,12 +598,22 @@ export function updateFolder(id: string, input: UpdateFolderInput): FolderRecord
         : current.filterMode,
     filterEntries:
       current.type === 'directory' ? (input.filterEntries ?? current.filterEntries) : current.filterEntries,
+    ignoredEntries: current.ignoredEntries,
     updatedAt: nowIso()
   }
 
   const filtersChanged =
     current.type === 'directory' &&
     (input.filterMode !== undefined || input.filterEntries !== undefined)
+
+  if (filtersChanged) {
+    next.ignoredEntries = ignoredFromFilter(
+      current.path,
+      next.filterMode,
+      next.filterEntries,
+      current.ignoredEntries
+    )
+  }
 
   writeMeta(recordToMeta(next))
   upsertFolderFromMeta(recordToMeta(next), current.existsOnDisk)
@@ -660,9 +739,12 @@ function excludeFromOwningDirectory(record: FolderRecord): void {
       ? owner.filterEntries.filter((entry) => entry !== name)
       : Array.from(new Set([...owner.filterEntries, name]))
 
-  const next = { ...owner, filterEntries, updatedAt: nowIso() }
-  writeMeta(recordToMeta(next))
-  upsertFolderFromMeta(recordToMeta(next), owner.existsOnDisk)
+  writeRecord({
+    ...owner,
+    filterEntries,
+    ignoredEntries: uniqueNames([...owner.ignoredEntries, name]),
+    updatedAt: nowIso()
+  })
 }
 
 export function deleteFolder(id: string): void {
@@ -716,13 +798,12 @@ export function syncDirectoryTracking(directoryId: string): boolean {
   const diskChildren = listDirectoryChildren(directory.path)
 
   for (const child of diskChildren) {
+    if (isExcludedName(directory, child.name)) continue
     const existing = findByNormalizedPath(child.path)
     if (existing?.type !== 'application' || existing.directory_owner) continue
     const record = getFolder(existing.id)
     if (!record) continue
-    const adopted = { ...record, directoryOwner: directoryId, updatedAt: nowIso() }
-    writeMeta(recordToMeta(adopted))
-    upsertFolderFromMeta(recordToMeta(adopted), record.existsOnDisk)
+    writeRecord({ ...record, directoryOwner: directoryId, updatedAt: nowIso() })
     changed = true
   }
 
@@ -730,24 +811,23 @@ export function syncDirectoryTracking(directoryId: string): boolean {
     .prepare('SELECT id, path FROM folders WHERE directory_owner = ? AND type = ?')
     .all(directoryId, 'application') as { id: string; path: string }[]
 
-  const trackable = diskChildren.filter((child) =>
-    shouldTrackChild(child.name, directory.filterMode, directory.filterEntries)
-  )
-  const trackablePaths = new Set(trackable.map((child) => normalizePath(child.path)))
-
   for (const row of owned) {
     const isImmediateChild = diskChildren.some(
       (child) => normalizePath(child.path) === normalizePath(row.path)
     )
     if (!isImmediateChild) continue
-    if (!trackablePaths.has(normalizePath(row.path))) {
+    if (isExcludedName(directory, path.basename(row.path))) {
       deleteFolder(row.id)
       changed = true
     }
   }
 
-  for (const child of trackable) {
+  const latest = getFolder(directoryId)
+  if (!latest) return changed
+
+  for (const child of diskChildren) {
     if (pathIsTracked(child.path)) continue
+    if (isExcludedName(latest, child.name)) continue
     addFolder({
       type: 'application',
       path: child.path,
@@ -805,14 +885,18 @@ export function setFolderOwners(folderIds: string[], directoryId: string | null)
 
   if (!directory || applicationNames.length === 0) return
 
+  const fresh = getFolder(directory.id)
+  if (!fresh) return
+
   const nextEntries =
-    directory.filterMode === 'allowlist'
-      ? Array.from(new Set([...directory.filterEntries, ...applicationNames]))
-      : directory.filterEntries.filter((entry) => !applicationNames.includes(entry))
+    fresh.filterMode === 'allowlist'
+      ? Array.from(new Set([...fresh.filterEntries, ...applicationNames]))
+      : fresh.filterEntries.filter((entry) => !applicationNames.includes(entry))
 
   writeRecord({
-    ...directory,
+    ...fresh,
     filterEntries: nextEntries,
+    ignoredEntries: fresh.ignoredEntries.filter((entry) => !applicationNames.includes(entry)),
     updatedAt: nowIso()
   })
 }
@@ -875,6 +959,10 @@ function applyExplorerFilters(records: FolderRecord[], query: ExplorerQuery): Fo
 
 export function listExplorerContents(query: ExplorerQuery): FolderRecord[] {
   const all = listAllRecords()
+  if (query.scope === 'all') {
+    return applyExplorerFilters(all, query)
+  }
+
   const parent = query.parentId ? all.find((record) => record.id === query.parentId) : null
 
   const items = all.filter((record) => {

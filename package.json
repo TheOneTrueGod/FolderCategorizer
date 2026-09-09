@@ -1,6 +1,7 @@
 {
   "name": "folder-catalog",
-  "version": "1.0.0",
+  "productName": "Folder Catalog",
+  "version": "1.0.1",
   "description": "Organize and categorize folders and files on disk",
   "main": "./out/main/index.js",
   "author": "Folder Catalog",

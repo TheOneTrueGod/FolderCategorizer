@@ -44,6 +44,12 @@ export function migrate(db: Database.Database): void {
       PRIMARY KEY (folder_id, entry_name)
     );
 
+    CREATE TABLE IF NOT EXISTS directory_ignored (
+      folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+      entry_name TEXT NOT NULL,
+      PRIMARY KEY (folder_id, entry_name)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_folders_type ON folders(type);
     CREATE INDEX IF NOT EXISTS idx_folders_name ON folders(name);
     CREATE INDEX IF NOT EXISTS idx_folder_tags_tag ON folder_tags(tag_id);

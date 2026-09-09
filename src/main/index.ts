@@ -4,7 +4,7 @@ import { pathToFileURL } from 'url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { initDatabase } from './db/database'
 import { registerIpc } from './ipc'
-import { getImagePath } from './library/paths'
+import { getImagePath, migrateLegacyPackagedData } from './library/paths'
 import { reconcileLibrary } from './library/store'
 import { startScanner, stopScanner } from './scanner/scanner'
 
@@ -71,6 +71,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  migrateLegacyPackagedData()
   initDatabase()
   reconcileLibrary()
   registerIpc()

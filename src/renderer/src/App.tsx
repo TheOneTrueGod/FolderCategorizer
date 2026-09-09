@@ -8,6 +8,7 @@ export default function App(): JSX.Element {
     <HashRouter>
       <Routes>
         <Route path="/" element={<ListingPage />} />
+        <Route path="/home" element={<ListingPage />} />
         <Route path="/dir/:directoryId" element={<ListingPage />} />
         <Route path="/folder/:id" element={<DetailsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
